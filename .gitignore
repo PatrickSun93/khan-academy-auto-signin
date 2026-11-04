@@ -1,0 +1,8 @@
+node_modules/
+__pycache__/
+.venv/
+*.pyc
+.env
+config.json
+extension/config.json
+secrets/
