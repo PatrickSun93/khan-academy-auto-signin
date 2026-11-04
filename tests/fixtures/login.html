@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- Stand-in for Khan Academy's login page. Served by tests at https://www.khanacademy.org/login.
+     TODO-RECON: mirror the real page's markup (field names, error element) once observed. -->
+<html><head><meta charset="utf-8"><title>Fake KA login</title></head>
+<body>
+  <div id="app"></div>
+  <script>
+    // Like the real SPA, render the form after load rather than in the initial HTML.
+    window.__submits = 0;
+    setTimeout(() => {
+      document.getElementById('app').innerHTML = `
+        <form id="login">
+          <input name="username" type="text" autocomplete="username">
+          <input name="password" type="password" autocomplete="current-password">
+          <button type="submit">Log in</button>
+          <div id="err"></div>
+        </form>`;
+      document.getElementById('login').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        window.__submits += 1;
+        const body = JSON.stringify({
+          username: e.target.username.value,
+          password: e.target.password.value,
+        });
+        const res = await fetch('/fixture/login', { method: 'POST', body });
+        const out = await res.json();
+        if (out.error) {
+          document.getElementById('err').innerHTML = '<div role="alert"></div>';
+          document.querySelector('#err [role=alert]').textContent = out.error;
+        } else if (out.navigate) {
+          location.href = out.navigate;
+        } else if (out.spa_navigate) {
+          history.pushState({}, '', out.spa_navigate);
+        }
+        // otherwise: do nothing (simulates a hung sign-in)
+      });
+    }, 200);
+  </script>
+</body></html>

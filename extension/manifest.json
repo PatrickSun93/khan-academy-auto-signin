@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Khan Academy Auto Sign-in",
+  "version": "0.1.0",
+  "description": "Signs in to Khan Academy with configured credentials and reports the outcome honestly.",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.khanacademy.org/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

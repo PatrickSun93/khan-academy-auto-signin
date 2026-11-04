@@ -7,3 +7,4 @@ config.json
 extension/config.json
 secrets/
 docs/
+.pytest_cache/
