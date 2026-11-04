@@ -16,6 +16,7 @@ open browser window. It never tries to get around it.
 
 import argparse
 import getpass
+import re
 import sys
 import time
 
@@ -26,27 +27,59 @@ EXIT_CREATED, EXIT_FAILED, EXIT_UNCERTAIN = 0, 1, 2
 OUTCOME_TIMEOUT_S = 30
 HUMAN_TIMEOUT_S = 300
 
-# TODO-RECON: confirm every selector below against the real sign-up flow.
+# Checked against the real sign-up flow on 2026-11-04 (stopped short of the final submit).
 SEL = {
-    "error": '[role="alert"]',
+    # [role="alert"] regions plus the per-field error slots (ids like ":rn:-labeled-field-error").
+    "error": '[role="alert"], [id$="-labeled-field-error"]',
     "captcha": 'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"]',
 }
 
-# The same current-user check the extension uses (extension/content.js, fetchCurrentUser).
-CURRENT_USER_JS = """
-async () => {
-  const res = await fetch('/api/internal/graphql/getFullUserProfile', {
-    method: 'POST', credentials: 'same-origin',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({operationName: 'getFullUserProfile',
-      query: 'query getFullUserProfile { user { id kaid email username isPhantom } }', variables: {}}),
-  });
-  if (!res.ok) return {known: false, reason: `current-user API returned HTTP ${res.status}`};
-  const user = (await res.json())?.data?.user;
-  if (!user || user.isPhantom) return {known: true, signedIn: false};
-  return {known: true, signedIn: true, email: user.email || ''};
-}
-"""
+# KA's GraphQL only accepts its own safelisted queries, so we don't send one. Instead we read
+# the answers to the current-user queries KA's own pages make, using Playwright's view of network
+# responses. getFullUserProfile includes the email; loggedInUserQuery doesn't.
+HOME_URL = "https://www.khanacademy.org/"
+USER_QUERIES = ("getFullUserProfile", "loggedInUserQuery")
+USER_TIMEOUT_S = 15
+
+
+def watch_user_responses(page: Page) -> list:
+    """Start collecting `data.user` from KA's own current-user responses (None = nobody signed in)."""
+    seen: list = []
+
+    def on_response(resp):
+        path = resp.url.split("?", 1)[0]
+        if "/api/internal/graphql/" not in path or not path.endswith(USER_QUERIES):
+            return
+        try:
+            seen.append((resp.json().get("data") or {}).get("user"))
+        except Exception:
+            pass  # not JSON (e.g. an error page): tells us nothing
+
+    page.on("response", on_response)
+    return seen
+
+
+def current_user_profile(page: Page, seen: list) -> dict:
+    """Open the home page (it asks KA who is signed in) and turn the answers into a profile dict."""
+    seen.clear()
+    page.goto(HOME_URL)
+    deadline = time.monotonic() + USER_TIMEOUT_S
+    while time.monotonic() < deadline and not any(u and "email" in u for u in seen):
+        page.wait_for_timeout(500)
+    # Second source: KA's own client-side copy of the signed-in user.
+    # TODO-RECON: the shape of window.__USER_PROFILE__ when signed in hasn't been confirmed.
+    client_user = page.evaluate("() => window.__USER_PROFILE__ || null")
+    if isinstance(client_user, dict) and client_user.get("email"):
+        seen.append(client_user)
+    if not seen:
+        return {"known": False, "reason": "Khan Academy's pages never reported a current user"}
+    users = [u for u in seen if u and not u.get("isPhantom")]
+    if not users:
+        return {"known": True, "signedIn": False}
+    with_email = [u for u in users if u.get("email")]
+    if not with_email:
+        return {"known": False, "reason": "signed in, but no response included the account's email"}
+    return {"known": True, "signedIn": True, "email": with_email[-1]["email"]}
 
 
 def classify(ka_error: str | None, profile: dict | None, expected_email: str) -> tuple[int, str]:
@@ -74,13 +107,31 @@ def read_credentials(email_arg: str | None) -> tuple[str, str]:
     return email, password
 
 
-def fill_signup_form(page: Page, email: str, password: str, birth_year: int) -> None:
-    """Walk the sign-up flow up to (and including) the final submit.
+def pick(page: Page, testid: str, option: str) -> None:
+    """KA's birthday fields are custom comboboxes: click to open, then click the option."""
+    page.get_by_test_id(testid).click()
+    page.get_by_role("option", name=option, exact=True).click()
 
-    TODO-RECON: the steps below are placeholders until the real flow has been observed
-    (role choice -> birthday -> email/password -> submit).
+
+def fill_signup_form(page: Page, email: str, password: str, birth_year: int) -> None:
+    """Walk the sign-up flow: role -> birthday -> email/password -> submit.
+
+    /signup  ->  /signup/learner/birthday  ->  /signup/learner/over-age-gate
     """
-    raise NotImplementedError("sign-up steps pending recon of the real flow (see BRIEF.md progress)")
+    # "Student: learning on my own" is the learner role. An adult birthday makes this an adult account.
+    page.get_by_role("link", name=re.compile(r"^Student")).click()
+    page.wait_for_url("**/signup/learner/birthday")
+    pick(page, "birthday-picker-month", "Jan")
+    pick(page, "birthday-picker-year", str(birth_year))
+    page.get_by_role("button", name="Next", exact=True).click()
+    page.wait_for_url("**/signup/learner/over-age-gate")
+
+    # Checking this box accepts KA's Terms of Service. The person running the script is the
+    # one agreeing, which is why the README asks you to read them first.
+    page.get_by_test_id("tos-checkbox").check()
+    page.locator('input[type="email"]').fill(email)
+    page.locator('input[type="password"]').fill(password)
+    page.get_by_role("button", name="Sign up", exact=True).click()
 
 
 def wait_for_outcome(page: Page) -> str | None:
@@ -112,11 +163,12 @@ def main() -> int:
     email, password = read_credentials(args.email)
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)  # headed: a human can see it, and step in for a CAPTCHA
-        page = browser.new_page()
+        page = browser.new_page()  # fresh context: no session exists before our sign-up
+        seen_users = watch_user_responses(page)
         page.goto(SIGNUP_URL)
         fill_signup_form(page, email, password, args.birth_year)
         ka_error = wait_for_outcome(page)
-        profile = None if ka_error else page.evaluate(CURRENT_USER_JS)
+        profile = None if ka_error else current_user_profile(page, seen_users)
         code, message = classify(ka_error, profile, email)
         print(message)
         browser.close()

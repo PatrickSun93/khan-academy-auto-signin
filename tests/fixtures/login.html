@@ -1,6 +1,7 @@
 <!doctype html>
 <!-- Stand-in for Khan Academy's login page. Served by tests at https://www.khanacademy.org/login.
-     TODO-RECON: mirror the real page's markup (field names, error element) once observed. -->
+     Field markup checked against the real page on 2026-11-04. TODO-RECON: the real
+     wrong-password message's element is still unknown (role=alert is an assumption). -->
 <html><head><meta charset="utf-8"><title>Fake KA login</title></head>
 <body>
   <div id="app"></div>
@@ -8,19 +9,30 @@
     // Like the real SPA, render the form after load rather than in the initial HTML.
     window.__submits = 0;
     setTimeout(() => {
+      // Mirrors the real page's structure (data-testids, aria-live error slots, and a
+      // "Log in" button that stays aria-disabled until both fields have a value).
       document.getElementById('app').innerHTML = `
         <form id="login">
-          <input name="username" type="text" autocomplete="username">
-          <input name="password" type="password" autocomplete="current-password">
-          <button type="submit">Log in</button>
+          <input name="username" type="text" data-testid="identifier-field" autocomplete="username">
+          <div aria-live="assertive" data-testid="identifier-error"></div>
+          <input name="current-password" type="password" data-testid="password-field" autocomplete="current-password">
+          <div aria-live="assertive" data-testid="password-error"></div>
+          <button type="submit" aria-disabled="true" data-testid="log-in-submit-button">Log in</button>
           <div id="err"></div>
         </form>`;
+      const f = document.getElementById('login');
+      const btn = f.querySelector('button');
+      f.addEventListener('input', () => {
+        const ready = f.username.value && f['current-password'].value;
+        btn.setAttribute('aria-disabled', ready ? 'false' : 'true');
+      });
       document.getElementById('login').addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (btn.getAttribute('aria-disabled') === 'true') return; // like KA: a disabled button does nothing
         window.__submits += 1;
         const body = JSON.stringify({
           username: e.target.username.value,
-          password: e.target.password.value,
+          password: e.target['current-password'].value,
         });
         const res = await fetch('/fixture/login', { method: 'POST', body });
         const out = await res.json();

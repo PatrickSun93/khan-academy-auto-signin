@@ -21,15 +21,22 @@
   const VERIFY_TIMEOUT_MS = 10_000; // time allowed for the session to show up in the API
   const POLL_MS = 250;
 
-  // TODO-RECON: confirm these selectors against the real login page.
+  // Checked against the real login page on 2026-11-04. KA's own data-testids are stabler than
+  // its generated class names.
   const SEL = {
-    username: 'input[name="username"], input[type="email"], input[autocomplete="username"]',
-    password: 'input[type="password"]',
-    error: '[role="alert"]',
+    username: '[data-testid="identifier-field"]',
+    password: '[data-testid="password-field"]',
+    submit: '[data-testid="log-in-submit-button"]',
+    // Per-field errors are aria-live regions, and they're empty until KA has something to say.
+    // [role="alert"] is there for a form-level error. TODO-RECON: confirm where the
+    // "wrong password" message is rendered.
+    error: '[data-testid="identifier-error"], [data-testid="password-error"], [role="alert"]',
     captcha: 'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"]',
   };
 
-  // TODO-RECON: confirm the endpoint and response shape against the real site.
+  // TODO-RECON: KA's GraphQL rejects queries that aren't on its safelist
+  // (403 "Operation not found in safelist"), so this ad-hoc query won't work on the real site.
+  // To be replaced once the signed-in page has been inspected (see BRIEF.md progress).
   const CURRENT_USER_URL = '/api/internal/graphql/getFullUserProfile';
   const CURRENT_USER_QUERY = 'query getFullUserProfile { user { id kaid email username isPhantom } }';
 
@@ -167,7 +174,8 @@
     const form = await waitFor(() => {
       const u = document.querySelector(SEL.username);
       const p = document.querySelector(SEL.password);
-      return u && p ? { u, p } : null;
+      const b = document.querySelector(SEL.submit);
+      return u && p && b ? { u, p, b } : null;
     }, FORM_TIMEOUT_MS);
     if (!form) return report('uncertain', 'Login form not found on the page; did not attempt sign-in.');
     if (document.querySelector(SEL.captcha)) return report('needs-human', 'A CAPTCHA is shown; please sign in manually.');
@@ -177,16 +185,13 @@
 
     setInputValue(form.u, cfg.username);
     setInputValue(form.p, cfg.password);
+    // KA keeps "Log in" aria-disabled until React has seen both values. If it never enables,
+    // our input didn't register, and clicking would do nothing, so we say so instead.
+    const enabled = await waitFor(() => form.b.getAttribute('aria-disabled') !== 'true', 3_000);
+    if (!enabled) return report('uncertain', 'The Log in button stayed disabled after filling the form; did not submit.');
     const marker = writeMarker(); // write it before submitting: the submit might reload the page
-    submit(form.p);
+    form.b.click(); // the same thing a user does
     await judgeOutcome(cfg, marker, preexisting);
-  }
-
-  function submit(passwordInput) {
-    const formEl = passwordInput.closest('form');
-    const button = formEl?.querySelector('button[type="submit"], input[type="submit"]');
-    if (button) button.click(); // closest to what a user does
-    else if (formEl) formEl.requestSubmit();
   }
 
   // Decide how the attempt turned out. Runs either right after submit, or on the page that the
