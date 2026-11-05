@@ -19,8 +19,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 GOOD_USER = "learner@example.test"
 GOOD_PASS = "correct-horse-battery"
-# Deliberately contains curly quotes and an em dash: the toast must reproduce it exactly.
-KA_ERROR = "We don’t recognize that email or password — please try again."
+# The real message, observed on 2026-11-04 after a wrong password.
+KA_ERROR = "Your login or password is incorrect."
 
 
 @dataclass
@@ -31,6 +31,7 @@ class FakeKA:
     profile: str = "honest"  # "honest" | "always_signed_out" | "http_500"
     signed_in: bool = False
     login_posts: int = 0
+    error_text: str = KA_ERROR  # what the fake shows for wrong credentials
 
     def handle(self, route):
         req = route.request
@@ -46,7 +47,7 @@ class FakeKA:
     def _login(self, route, creds):
         self.login_posts += 1
         if creds.get("username") != GOOD_USER or creds.get("password") != GOOD_PASS:
-            return route.fulfill(json={"error": KA_ERROR})
+            return route.fulfill(json={"error": self.error_text})
         if self.on_success == "hang":
             return route.fulfill(json={})
         self.signed_in = True

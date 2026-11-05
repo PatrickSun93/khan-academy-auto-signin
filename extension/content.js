@@ -27,10 +27,10 @@
     username: '[data-testid="identifier-field"]',
     password: '[data-testid="password-field"]',
     submit: '[data-testid="log-in-submit-button"]',
-    // Per-field errors are aria-live regions, and they're empty until KA has something to say.
-    // [role="alert"] is there for a form-level error. TODO-RECON: confirm where the
-    // "wrong password" message is rendered.
-    error: '[data-testid="identifier-error"], [data-testid="password-error"], [role="alert"]',
+    // Wrong credentials: KA adds <div id="log-in-server-error" role="alert"> above the button
+    // (seen 2026-11-04: "Your login or password is incorrect."). The per-field slots are aria-live
+    // regions, empty until a field is invalid. [role="alert"] catches any other form-level error.
+    error: '#log-in-server-error, [data-testid="identifier-error"], [data-testid="password-error"], [role="alert"]',
     captcha: 'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"]',
   };
 

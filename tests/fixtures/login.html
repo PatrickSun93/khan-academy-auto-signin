@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- Stand-in for Khan Academy's login page. Served by tests at https://www.khanacademy.org/login.
-     Field markup checked against the real page on 2026-11-04. TODO-RECON: the real
-     wrong-password message's element is still unknown (role=alert is an assumption). -->
+     Markup checked against the real page on 2026-11-04, including the server-error element
+     that appears after a wrong password. -->
 <html><head><meta charset="utf-8"><title>Fake KA login</title></head>
 <body>
   <div id="app"></div>
@@ -17,8 +17,8 @@
           <div aria-live="assertive" data-testid="identifier-error"></div>
           <input name="current-password" type="password" data-testid="password-field" autocomplete="current-password">
           <div aria-live="assertive" data-testid="password-error"></div>
-          <button type="submit" aria-disabled="true" data-testid="log-in-submit-button">Log in</button>
           <div id="err"></div>
+          <button type="submit" aria-disabled="true" data-testid="log-in-submit-button">Log in</button>
         </form>`;
       const f = document.getElementById('login');
       const btn = f.querySelector('button');
@@ -37,8 +37,9 @@
         const res = await fetch('/fixture/login', { method: 'POST', body });
         const out = await res.json();
         if (out.error) {
-          document.getElementById('err').innerHTML = '<div role="alert"></div>';
-          document.querySelector('#err [role=alert]').textContent = out.error;
+          // Same element as the real page: it only exists once there's an error to show.
+          document.getElementById('err').innerHTML = '<div id="log-in-server-error" role="alert"></div>';
+          document.getElementById('log-in-server-error').textContent = out.error;
         } else if (out.navigate) {
           location.href = out.navigate;
         } else if (out.spa_navigate) {

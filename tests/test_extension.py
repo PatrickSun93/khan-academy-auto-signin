@@ -24,6 +24,14 @@ def test_wrong_credentials_show_ka_error_verbatim(launch, fake_ka):
     assert fake_ka.login_posts == 1
 
 
+def test_error_text_is_not_normalised(launch, fake_ka):
+    # Curly quotes, an em dash, a non-ASCII letter: the toast must not "tidy" any of it.
+    fake_ka.error_text = "We don’t recognise “that” login — réessayez."
+    _, page, _ = launch({"username": GOOD_USER, "password": "wrong"})
+    page.goto(LOGIN)
+    assert toast(page) == ("failure", fake_ka.error_text)
+
+
 def test_missing_config_falls_back_to_example_and_fails(launch, fake_ka):
     _, page, lines = launch(None)
     page.goto(LOGIN)
