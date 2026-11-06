@@ -50,7 +50,8 @@ TODO (expand): the outcome states (failure / success / uncertain / needs-human /
 | Requested | Why |
 |---|---|
 | `content_scripts.matches: https://www.khanacademy.org/*` | TODO: the only host access. Needed on the login page, and on the page the submit lands on, to verify the sign-in. |
-| (no `permissions`, no `host_permissions`) | The config is read from the extension package, and state is kept in the page's sessionStorage, so `storage` isn't needed. The service worker never contacts KA. |
+| `storage` | Holds the sliding-window attempt counter (at most 3 sign-in submits per 5 minutes, across all tabs), so a wrong config plus repeated reloads can't get the account locked. Only timestamps are stored, never credentials. `chrome.storage` is used rather than the site's localStorage so KA's page scripts can't read or reset it. |
+| (no `host_permissions`) | The config is read from the extension package, and the service worker never contacts KA. |
 
 ## Tests
 

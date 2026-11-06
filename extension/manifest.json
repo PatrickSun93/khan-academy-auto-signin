@@ -3,6 +3,7 @@
   "name": "Khan Academy Auto Sign-in",
   "version": "0.1.0",
   "description": "Signs in to Khan Academy with configured credentials and reports the outcome honestly.",
+  "permissions": ["storage"],
   "background": {
     "service_worker": "background.js"
   },

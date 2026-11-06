@@ -158,6 +158,15 @@
     }
   }
 
+  async function reserveAttempt() {
+    try {
+      return await chrome.runtime.sendMessage({ type: 'reserveAttempt' });
+    } catch (e) {
+      // If we can't check the limit, don't submit: an extra attempt costs more than a skipped one.
+      return { allowed: false, max: 0, windowMs: 0, retryInMs: 0 };
+    }
+  }
+
   // ---------- the flow ----------
 
   // Runs on a fresh visit to the login page. Submits at most once.
@@ -189,6 +198,14 @@
     // our input didn't register, and clicking would do nothing, so we say so instead.
     const enabled = await waitFor(() => form.b.getAttribute('aria-disabled') !== 'true', 3_000);
     if (!enabled) return report('uncertain', 'The Log in button stayed disabled after filling the form; did not submit.');
+
+    // Ask the background for a slot in the sliding-window limit right before the one real submit.
+    const slot = await reserveAttempt();
+    if (!slot.allowed) {
+      const wait = Math.ceil(slot.retryInMs / 60_000);
+      return report('info', `Sign-in skipped: already tried ${slot.max} times in the last ${slot.windowMs / 60_000} minutes. ` +
+        `Waiting avoids locking the account. Try again in about ${wait} min.`);
+    }
     const marker = writeMarker(); // write it before submitting: the submit might reload the page
     form.b.click(); // the same thing a user does
     await judgeOutcome(cfg, marker, preexisting);

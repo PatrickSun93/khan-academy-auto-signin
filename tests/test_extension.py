@@ -98,6 +98,24 @@ def test_reload_counts_as_a_new_visit(launch, fake_ka):
     assert fake_ka.login_posts == 2
 
 
+def test_sliding_window_limit_is_shared_across_tabs(launch, fake_ka):
+    ctx, page, _ = launch({"username": GOOD_USER, "password": "wrong"})
+    page.goto(LOGIN)
+    toast(page)
+    for _ in range(2):  # two manual reloads: new visits, so attempts 2 and 3
+        page.reload()
+        toast(page)
+    assert fake_ka.login_posts == 3
+
+    other = ctx.new_page()  # a 4th visit, in another tab, must be refused
+    other.goto(LOGIN)
+    kind, text = toast(other)
+    assert kind == "info"
+    assert text.startswith("Sign-in skipped: already tried 3 times in the last 5 minutes.")
+    assert fake_ka.login_posts == 3
+    assert other.evaluate("window.__submits") == 0
+
+
 def test_does_nothing_on_other_pages(launch, fake_ka):
     _, page, lines = launch()
     page.goto("https://www.khanacademy.org/math")
