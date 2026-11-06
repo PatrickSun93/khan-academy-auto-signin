@@ -31,7 +31,7 @@ If a CAPTCHA appears, the script prints `NEEDS HUMAN` and waits for you to finis
 1. `cp extension/config.example.json extension/config.json`, then put the real email and password in `config.json`. That file is gitignored.
    Without `config.json`, the extension uses `config.example.json`, whose values are deliberately wrong, so the first run fails on purpose.
 2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and select the `extension/` folder.
-3. After editing `config.json`, click the reload icon on the extension's card.
+3. After editing `config.json`, just reload the login page. You don't need to reload the extension: `background.js` re-reads the file on every request, and Chrome serves an unpacked extension's files straight from disk (covered by a test).
 4. Open https://www.khanacademy.org/login. The toast appears bottom-right, and the log line (prefixed `[KA auto sign-in]`) is in that tab's DevTools console.
 
 ## Design decisions

@@ -1,6 +1,8 @@
 """End-to-end tests for the extension against the fake Khan Academy (see conftest.py)."""
 
-from conftest import GOOD_USER, KA_ERROR
+import json
+
+from conftest import GOOD_PASS, GOOD_USER, KA_ERROR
 
 TOAST = "[data-ka-autosignin-toast]"
 LOGIN = "https://www.khanacademy.org/login"
@@ -114,6 +116,17 @@ def test_sliding_window_limit_is_shared_across_tabs(launch, fake_ka):
     assert text.startswith("Sign-in skipped: already tried 3 times in the last 5 minutes.")
     assert fake_ka.login_posts == 3
     assert other.evaluate("window.__submits") == 0
+
+
+def test_config_edits_apply_without_reloading_extension(launch, fake_ka, tmp_path):
+    # background.js re-reads config.json on every request, and Chrome serves an unpacked
+    # extension's files straight from disk, so fixing the config only needs a page reload.
+    _, page, _ = launch({"username": GOOD_USER, "password": "wrong"})
+    page.goto(LOGIN)
+    assert toast(page)[0] == "failure"
+    (tmp_path / "extension" / "config.json").write_text(json.dumps({"username": GOOD_USER, "password": GOOD_PASS}))
+    page.reload()
+    assert toast(page)[0] == "success"
 
 
 def test_does_nothing_on_other_pages(launch, fake_ka):
