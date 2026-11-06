@@ -186,7 +186,7 @@
       const b = document.querySelector(SEL.submit);
       return u && p && b ? { u, p, b } : null;
     }, FORM_TIMEOUT_MS);
-    if (!form) return report('uncertain', 'Login form not found on the page; did not attempt sign-in.');
+    if (!form) return report('uncertain', 'Login form not found on the page; did not attempt sign-in. Reload the page to try again.');
     if (document.querySelector(SEL.captcha)) return report('needs-human', 'A CAPTCHA is shown; please sign in manually.');
 
     // Errors already on screen weren't caused by our submit, so they don't count later.
@@ -197,7 +197,7 @@
     // KA keeps "Log in" aria-disabled until React has seen both values. If it never enables,
     // our input didn't register, and clicking would do nothing, so we say so instead.
     const enabled = await waitFor(() => form.b.getAttribute('aria-disabled') !== 'true', 3_000);
-    if (!enabled) return report('uncertain', 'The Log in button stayed disabled after filling the form; did not submit.');
+    if (!enabled) return report('uncertain', 'The Log in button stayed disabled after filling the form; did not submit. Reload the page to try again.');
 
     // Ask the background for a slot in the sliding-window limit right before the one real submit.
     const slot = await reserveAttempt();
@@ -234,10 +234,12 @@
 
     if (last.known && last.signedIn) {
       if (isConfiguredUser(last, cfg)) return finish('success', 'Signed in to Khan Academy (confirmed by the current-user API).');
-      return finish('uncertain', 'A session exists, but for a different account than the configured one. Not reported as success.');
+      return finish('uncertain', 'A session exists, but for a different account than the configured one. Not reported as success. Log out of that account, then reopen the login page.');
     }
-    if (last.known) return finish('uncertain', 'No error was shown, but Khan Academy reports no signed-in user. Not reported as success.');
-    return finish('uncertain', `Could not confirm the sign-in: ${last.reason}. Not reported as success.`);
+    // Reloading is safe: the next visit checks first, and if we did get signed in it won't submit again.
+    const next = 'Reload the login page to check again, or sign in manually.';
+    if (last.known) return finish('uncertain', `No error was shown, but Khan Academy reports no signed-in user. Not reported as success. ${next}`);
+    return finish('uncertain', `Could not confirm the sign-in: ${last.reason}. Not reported as success. ${next}`);
   }
 
   function finish(kind, message) {
