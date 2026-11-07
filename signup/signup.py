@@ -82,6 +82,28 @@ def current_user_profile(page: Page, seen: list) -> dict:
     return {"known": True, "signedIn": True, "email": with_email[-1]["email"]}
 
 
+# Second, independent source: the server-rendered HTML of the home page (the same check the
+# extension uses). We print only yes/no answers and the text just before the email, with every
+# email and kaid masked, so the output is safe to show on a recording.
+SERVER_HTML_CHECK = """async (email) => {
+  const html = await (await fetch('/', { credentials: 'same-origin' })).text();
+  const mask = (s) => s.replace(/"[^"]*@[^"]*"/g, '"<email>"').replace(/"kaid_[^"]*"/g, '"<kaid>"');
+  const i = html.toLowerCase().indexOf(email.toLowerCase());
+  return {
+    hasProfileTrue: html.includes('"KA-has-profile":true'),
+    emailInHtml: i >= 0,
+    beforeEmail: i < 0 ? null : mask(html.slice(Math.max(0, i - 120), i)) + '<email>',
+  };
+}"""
+
+
+def server_html_evidence(page: Page, email: str) -> dict:
+    try:
+        return page.evaluate(SERVER_HTML_CHECK, email)
+    except Exception as e:  # evidence only; never turns into "created"
+        return {"error": type(e).__name__}
+
+
 def classify(ka_error: str | None, profile: dict | None, expected_email: str) -> tuple[int, str]:
     """Turn what we saw into (exit code, message). Pure function so it can be unit-tested.
 
@@ -113,7 +135,7 @@ def pick(page: Page, testid: str, option: str) -> None:
     page.get_by_role("option", name=option, exact=True).click()
 
 
-def fill_signup_form(page: Page, email: str, password: str, birth_year: int) -> None:
+def fill_signup_form(page: Page, email: str, password: str, birth_year: int) -> set[str]:
     """Walk the sign-up flow: role -> birthday -> email/password -> submit.
 
     /signup  ->  /signup/learner/birthday  ->  /signup/learner/over-age-gate
@@ -131,15 +153,25 @@ def fill_signup_form(page: Page, email: str, password: str, birth_year: int) -> 
     page.get_by_test_id("tos-checkbox").check()
     page.locator('input[type="email"]').fill(email)
     page.locator('input[type="password"]').fill(password)
+    preexisting = error_texts(page)
     page.get_by_role("button", name="Sign up", exact=True).click()
+    return preexisting
 
 
-def wait_for_outcome(page: Page) -> str | None:
-    """After submit: return KA's error text, or None once the page shows no error and has moved on."""
+def error_texts(page: Page) -> set[str]:
+    return {t.strip() for t in page.locator(SEL["error"]).all_inner_texts() if t.strip()}
+
+
+def wait_for_outcome(page: Page, preexisting: set[str]) -> str | None:
+    """After submit: return KA's error text, or None once the page shows no error and has moved on.
+
+    `preexisting` is whatever alert text was already on the page before we clicked Sign up;
+    only text that appears after the click counts as KA's answer.
+    """
     deadline = time.monotonic() + OUTCOME_TIMEOUT_S
     told_human = False
     while time.monotonic() < deadline:
-        errors = [t.strip() for t in page.locator(SEL["error"]).all_inner_texts() if t.strip()]
+        errors = sorted(error_texts(page) - preexisting)
         if errors:
             return "\n".join(errors)
         if page.locator(SEL["captcha"]).count():
@@ -166,11 +198,14 @@ def main() -> int:
         page = browser.new_page()  # fresh context: no session exists before our sign-up
         seen_users = watch_user_responses(page)
         page.goto(SIGNUP_URL)
-        fill_signup_form(page, email, password, args.birth_year)
-        ka_error = wait_for_outcome(page)
+        preexisting = fill_signup_form(page, email, password, args.birth_year)
+        ka_error = wait_for_outcome(page, preexisting)
         profile = None if ka_error else current_user_profile(page, seen_users)
         code, message = classify(ka_error, profile, email)
         print(message)
+        if not ka_error:
+            print("Server HTML check (masked):", server_html_evidence(page, email))
+        input("Press Enter to close the browser...")  # leaves time to look at the signed-in page
         browser.close()
     return code
 
