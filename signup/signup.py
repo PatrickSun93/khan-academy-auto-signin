@@ -20,7 +20,7 @@ import re
 import sys
 import time
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Error as PlaywrightError, Page, sync_playwright
 
 SIGNUP_URL = "https://www.khanacademy.org/signup"
 EXIT_CREATED, EXIT_FAILED, EXIT_UNCERTAIN = 0, 1, 2
@@ -38,6 +38,7 @@ SEL = {
 # the answers to the current-user queries KA's own pages make, using Playwright's view of network
 # responses. getFullUserProfile includes the email; loggedInUserQuery doesn't.
 HOME_URL = "https://www.khanacademy.org/"
+LOGIN_URL = "https://www.khanacademy.org/login"
 USER_QUERIES = ("getFullUserProfile", "loggedInUserQuery")
 USER_TIMEOUT_S = 15
 
@@ -159,7 +160,12 @@ def fill_signup_form(page: Page, email: str, password: str, birth_year: int) -> 
 
 
 def error_texts(page: Page) -> set[str]:
-    return {t.strip() for t in page.locator(SEL["error"]).all_inner_texts() if t.strip()}
+    try:
+        return {t.strip() for t in page.locator(SEL["error"]).all_inner_texts() if t.strip()}
+    except PlaywrightError:
+        # The page is in the middle of a full navigation (KA does this after a successful sign-up),
+        # so there is no document to read yet. "No error seen" is the honest answer; the loop retries.
+        return set()
 
 
 def wait_for_outcome(page: Page, preexisting: set[str]) -> str | None:
@@ -186,11 +192,41 @@ def wait_for_outcome(page: Page, preexisting: set[str]) -> str | None:
     return None  # timed out; the profile check that follows decides, and will say "uncertain"
 
 
+def verify_only(email: str) -> int:
+    """Prove an existing account without creating one: a human signs in by hand, then we check.
+
+    The script never sees the password here: you type it into Khan Academy's own login page.
+    Same proof as after sign-up: KA's current-user answer must show this email.
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        seen_users = watch_user_responses(page)
+        page.goto(LOGIN_URL)
+        print(f"Sign in by hand in the browser window (waiting up to {HUMAN_TIMEOUT_S}s).")
+        try:
+            page.wait_for_url(lambda url: "/login" not in url, timeout=HUMAN_TIMEOUT_S * 1000)
+        except PlaywrightError:
+            pass  # still on /login: the profile check below will say nobody is signed in
+        profile = current_user_profile(page, seen_users)
+        code, message = classify(None, profile, email)
+        print(message.replace("CREATED:", "EXISTS:"))
+        print("Server HTML check (masked):", server_html_evidence(page, email))
+        input("Press Enter to close the browser...")
+        browser.close()
+    return code
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--email", help="email for the new account (prompted for if omitted)")
     parser.add_argument("--birth-year", type=int, default=1990, help="adult birth year (default 1990)")
+    parser.add_argument("--verify-only", action="store_true",
+                        help="don't sign up; you sign in by hand and the script checks the account exists")
     args = parser.parse_args()
+
+    if args.verify_only:
+        return verify_only(args.email or input("Email of the account: ").strip())
 
     email, password = read_credentials(args.email)
     with sync_playwright() as p:
