@@ -5,7 +5,7 @@ Two pieces:
 - `signup/signup.py` creates one free adult learner account (email + password) and reports whether it was actually created.
 - `extension/` is a Chrome Manifest V3 extension. It signs that account in on the Khan Academy login page and reports the outcome honestly: KA's own error text, word for word, on failure, and a success toast only once the sign-in is confirmed.
 
-Recording: TODO (link)
+Recording (3:22): [sign-up script → wrong-password toast → confirmed sign-in](https://drive.google.com/file/d/1h2A3U3n4iQLYknFT3VIARTB9FRmYHYrI/view?usp=sharing)
 
 ## Setup
 
