@@ -28,7 +28,9 @@ class FakeKA:
     """Server-side state of the fake site. Tests flip these options per scenario."""
 
     on_success: str = "navigate"  # "navigate" (full page load) | "spa" (pushState) | "hang"
-    profile: str = "honest"  # "honest" | "always_signed_out" | "http_500"
+    # How the home page reports the session to the extension's check (its fetch of "/"):
+    # "honest" | "always_signed_out" | "http_500" (always) | "http_500_after_login" | "no_flag"
+    profile: str = "honest"
     signed_in: bool = False
     login_posts: int = 0
     error_text: str = KA_ERROR  # what the fake shows for wrong credentials
@@ -38,11 +40,11 @@ class FakeKA:
         path = req.url.split("khanacademy.org", 1)[1].split("?", 1)[0]
         if path == "/fixture/login" and req.method == "POST":
             return self._login(route, json.loads(req.post_data or "{}"))
-        if path.startswith("/api/internal/graphql/getFullUserProfile"):
-            return self._profile(route)
         if path == "/login" or path.startswith("/login/"):
             return route.fulfill(path=FIXTURES / "login.html", content_type="text/html")
-        return route.fulfill(path=FIXTURES / "home.html", content_type="text/html")
+        if req.resource_type == "fetch":
+            return self._home_for_check(route)
+        return route.fulfill(body=self._home_html(self.signed_in), content_type="text/html")
 
     def _login(self, route, creds):
         self.login_posts += 1
@@ -54,12 +56,18 @@ class FakeKA:
         key = "spa_navigate" if self.on_success == "spa" else "navigate"
         return route.fulfill(json={key: "/"})
 
-    def _profile(self, route):
-        if self.profile == "http_500":
+    def _home_html(self, has_profile: bool, flag: bool = True) -> str:
+        """Like KA, the server renders the session flags into the page (format seen on the real site)."""
+        data = f'{{"KA-has-profile":{str(has_profile).lower()},"KA-is-phantom":false}}' if flag else "{}"
+        return (FIXTURES / "home.html").read_text().replace("__KA_DATA_JSON__", data)
+
+    def _home_for_check(self, route):
+        """The extension's fetch("/"). Page navigations are served honestly; only this check is faked."""
+        if self.profile == "http_500" or (self.profile == "http_500_after_login" and self.signed_in):
             return route.fulfill(status=500, body="oops")
-        signed_in = self.signed_in and self.profile == "honest"
-        user = {"id": "1", "kaid": "kaid_1", "email": GOOD_USER, "username": "learner", "isPhantom": False}
-        return route.fulfill(json={"data": {"user": user if signed_in else None}})
+        has_profile = self.signed_in and self.profile != "always_signed_out"
+        return route.fulfill(body=self._home_html(has_profile, flag=self.profile != "no_flag"),
+                             content_type="text/html")
 
 
 def make_extension(tmp_path: Path, config: dict | None) -> Path:

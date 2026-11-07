@@ -65,13 +65,36 @@ def test_redirect_without_session_is_not_success(launch, fake_ka):
     assert toast(page)[0] == "uncertain"
 
 
-def test_unavailable_current_user_api_is_not_success(launch, fake_ka):
-    fake_ka.profile = "http_500"
+def test_unreadable_state_after_submit_is_not_success(launch, fake_ka):
+    fake_ka.profile = "http_500_after_login"
     _, page, _ = launch()
     page.goto(LOGIN)
     kind, text = toast(page)
     assert kind == "uncertain"
     assert "HTTP 500" in text
+    assert fake_ka.login_posts == 1
+
+
+def test_unreadable_state_before_submit_means_no_submit(launch, fake_ka):
+    # Without "nobody was signed in before", a session afterwards proves nothing, so don't even try.
+    fake_ka.profile = "http_500"
+    _, page, _ = launch()
+    page.goto(LOGIN)
+    kind, text = toast(page)
+    assert kind == "uncertain"
+    assert "Did not submit" in text
+    assert fake_ka.login_posts == 0
+
+
+def test_missing_session_flag_is_not_success(launch, fake_ka):
+    # If KA stops rendering the flag, we must say we can't tell, not guess either way.
+    fake_ka.profile = "no_flag"
+    _, page, _ = launch()
+    page.goto(LOGIN)
+    kind, text = toast(page)
+    assert kind == "uncertain"
+    assert "KA-has-profile" in text
+    assert fake_ka.login_posts == 0
 
 
 def test_hung_sign_in_times_out_as_uncertain(launch, fake_ka):

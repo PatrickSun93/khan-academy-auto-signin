@@ -42,8 +42,15 @@ TODO (expand): the outcome states (failure / success / uncertain / needs-human /
 
 ## How we know it worked
 
-- **Account created:** TODO
-- **Signed in:** TODO. Rule: success needs positive proof (KA's current-user API returns the configured account). A redirect, or no error showing up, isn't enough. Anything short of proof is reported as *uncertain*.
+- **Account created:** the script starts in a fresh browser with no session. After submitting the sign-up form, it opens the home page and reads the answer of Khan Academy's own current-user request (`getFullUserProfile`, which the page makes by itself). It reports `CREATED` only if that answer contains a signed-in, non-guest user whose email matches the one just registered. A KA error means `FAILED`, and anything else means `UNCERTAIN`. As a second check, the server-rendered home page must say `"KA-has-profile":true`. The script prints only yes/no for that check.
+- **Signed in (extension):** success needs proof on both sides of our one submit:
+  1. **Before:** the server-rendered home page (`fetch('/')`) says `"KA-has-profile":false`. If that can't be read, the extension doesn't submit.
+  2. We submit the configured credentials, and no error appears.
+  3. **After:** the same page now says `"KA-has-profile":true`, and it isn't a guest ("phantom") profile.
+
+  Ours was the only sign-in in between, so the session belongs to the configured account. A redirect, a cookie, or simply no error isn't enough. Anything short of this is reported as *uncertain*.
+
+  The page HTML doesn't contain the email, which is why identity is shown this way rather than by comparing emails. KA's GraphQL API only accepts its own safelisted queries, so the extension can't ask it directly.
 
 ## Permissions
 
@@ -63,7 +70,14 @@ The extension tests load the real unpacked extension in Playwright's Chromium. A
 
 ## Known limitations / next steps
 
-TODO
+- **Identity is shown by before/after, not by email.** If someone signed in to a *different* account by hand in another tab during the few seconds after our submit, the extension would report success for that session. Next step: read the email from a page that renders it (for example, account settings) and compare.
+- The session check depends on KA continuing to render `KA-has-profile` into its HTML. If KA drops it, the extension says it can't tell and doesn't submit. It never guesses.
+- Only one KA error text has been seen on the real site ("Your login or password is incorrect."). Others, such as lockout or rate-limit messages, are shown verbatim by the same code, but haven't been observed.
+- 2FA or any extra step after the password ends as *uncertain*.
+- Window expiry of the 3-per-5-minutes limit isn't tested (it needs a fake clock).
+- The first real sign-up run crashed: KA does a full page navigation after "Sign up", and the script was reading the page at that moment. No account was created. Fixed by treating "page is navigating" as "no error yet", and by reporting `UNCERTAIN` with the window left open for any unexpected exception.
+
+TODO (Patrick): anything else.
 
 ## AI tools used
 
