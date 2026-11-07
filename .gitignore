@@ -8,3 +8,6 @@ extension/config.json
 secrets/
 docs/
 .pytest_cache/
+
+# Private working notes, kept local only
+BRIEF.md
