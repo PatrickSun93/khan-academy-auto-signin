@@ -217,6 +217,16 @@ def verify_only(email: str) -> int:
     return code
 
 
+def page_path(page: Page) -> str:
+    """URL path only: query strings are dropped so nothing the user typed can be printed."""
+    return page.url.split("?", 1)[0].split("#", 1)[0]
+
+
+def log_navigations(page: Page) -> None:
+    """Print each top-level page change, so a run's path through KA's flow is visible."""
+    page.on("framenavigated", lambda f: f == page.main_frame and print("  page:", page_path(page)))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--email", help="email for the new account (prompted for if omitted)")
@@ -233,15 +243,23 @@ def main() -> int:
         browser = p.chromium.launch(headless=False)  # headed: a human can see it, and step in for a CAPTCHA
         page = browser.new_page()  # fresh context: no session exists before our sign-up
         seen_users = watch_user_responses(page)
-        page.goto(SIGNUP_URL)
-        preexisting = fill_signup_form(page, email, password, args.birth_year)
-        ka_error = wait_for_outcome(page, preexisting)
-        profile = None if ka_error else current_user_profile(page, seen_users)
-        code, message = classify(ka_error, profile, email)
-        print(message)
-        if not ka_error:
-            print("Server HTML check (masked):", server_html_evidence(page, email))
-        input("Press Enter to close the browser...")  # leaves time to look at the signed-in page
+        log_navigations(page)
+        try:
+            page.goto(SIGNUP_URL)
+            preexisting = fill_signup_form(page, email, password, args.birth_year)
+            ka_error = wait_for_outcome(page, preexisting)
+            profile = None if ka_error else current_user_profile(page, seen_users)
+            code, message = classify(ka_error, profile, email)
+            print(message)
+            if not ka_error:
+                print("Server HTML check (masked):", server_html_evidence(page, email))
+        except Exception as e:
+            # Something we didn't expect. Don't guess: say uncertain and keep the window open so a
+            # human can see what state KA is in (the account may or may not exist).
+            code = EXIT_UNCERTAIN
+            print(f"UNCERTAIN: the script hit an unexpected {type(e).__name__} at {page_path(page)}. "
+                  "Check the browser window before re-running.")
+        input("Press Enter to close the browser...")  # leaves time to look at the page
         browser.close()
     return code
 
