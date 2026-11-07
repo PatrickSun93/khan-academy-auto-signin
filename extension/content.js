@@ -53,6 +53,11 @@
 
   // ---------- reporting ----------
 
+  // Progress lines, so the console shows how far a visit got. Never includes credentials.
+  function step(text) {
+    console.info(`${LOG_PREFIX} ${text}`);
+  }
+
   function report(kind, message) {
     const line = `${LOG_PREFIX} ${kind}: ${message}`;
     if (kind === 'failure' || kind === 'needs-human') console.error(line);
@@ -168,6 +173,7 @@
   async function attemptSignIn() {
     const cfg = await getConfig();
     if (!cfg) return report('info', 'No usable credentials in config.json or config.example.json; not signing in.');
+    step(`login page visit: credentials from ${cfg.source}`);
     if (cfg.source !== 'config.json') {
       console.warn(`${LOG_PREFIX} config.json not found, using ${cfg.source} (deliberately wrong values).`);
     }
@@ -177,6 +183,7 @@
     const before = await signInState();
     if (!before.known) return report('uncertain', `Could not check whether anyone is already signed in: ${before.reason}. Did not submit. Reload the page to try again.`);
     if (before.signedIn) return report('info', 'Already signed in; not attempting sign-in.');
+    step('before submit: nobody is signed in');
 
     const form = await waitFor(() => {
       const u = document.querySelector(SEL.username);
@@ -187,6 +194,7 @@
     if (!form) return report('uncertain', 'Login form not found on the page; did not attempt sign-in. Reload the page to try again.');
     if (document.querySelector(SEL.captcha)) return report('needs-human', 'A CAPTCHA is shown; please sign in manually.');
 
+    step('login form found');
     // Errors already on screen weren't caused by our submit, so they don't count later.
     const preexisting = new Set(errorTexts());
 
@@ -204,6 +212,7 @@
       return report('info', `Sign-in skipped: already tried ${slot.max} times in the last ${slot.windowMs / 60_000} minutes. ` +
         `Waiting avoids locking the account. Try again in about ${wait} min.`);
     }
+    step('submitting (attempt reserved)');
     const marker = writeMarker(); // write it before submitting: the submit might reload the page
     form.b.click(); // the same thing a user does
     await judgeOutcome(marker, preexisting);
@@ -255,7 +264,14 @@
 
   async function run(task) {
     busy = true;
-    try { await task(); } finally { busy = false; }
+    try {
+      await task();
+    } catch (e) {
+      // Never fail silently: an unexpected error is reported, and it is not a success.
+      finish('uncertain', `Unexpected error in the extension: ${e && e.message}. Not reported as success. Reload the login page to try again.`);
+    } finally {
+      busy = false;
+    }
   }
 
   // A "visit" begins when we arrive on the login page: a page load or an SPA route change into /login.
