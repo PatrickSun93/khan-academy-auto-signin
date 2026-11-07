@@ -3,14 +3,21 @@
   "name": "Khan Academy Auto Sign-in",
   "version": "0.1.0",
   "description": "Signs in to Khan Academy with configured credentials and reports the outcome honestly.",
-  "permissions": ["storage"],
+  "permissions": [
+    "storage"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://www.khanacademy.org/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.khanacademy.org/*",
+        "https://accounts.khanacademy.org/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

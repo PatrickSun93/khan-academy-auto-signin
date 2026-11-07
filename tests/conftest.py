@@ -28,6 +28,9 @@ class FakeKA:
     """Server-side state of the fake site. Tests flip these options per scenario."""
 
     on_success: str = "navigate"  # "navigate" (full page load) | "spa" (pushState) | "hang"
+    # "www": the form is served at www.khanacademy.org/login. "accounts": like KA does for many users,
+    # www.khanacademy.org/login redirects to accounts.khanacademy.org/login, and success lands on www.
+    login_host: str = "www"
     # How the home page reports the session to the extension's check (its fetch of "/"):
     # "honest" | "always_signed_out" | "http_500" (always) | "http_500_after_login" | "no_flag"
     profile: str = "honest"
@@ -40,7 +43,13 @@ class FakeKA:
         path = req.url.split("khanacademy.org", 1)[1].split("?", 1)[0]
         if path == "/fixture/login" and req.method == "POST":
             return self._login(route, json.loads(req.post_data or "{}"))
+        on_accounts = req.url.startswith("https://accounts.khanacademy.org/")
         if path == "/login" or path.startswith("/login/"):
+            if self.login_host == "accounts" and not on_accounts:
+                # A script redirect rather than HTTP 302: Playwright doesn't route the request that
+                # follows a fulfilled 302, so that one would reach the real site.
+                return route.fulfill(content_type="text/html",
+                                     body='<script>location.replace("https://accounts.khanacademy.org/login")</script>')
             return route.fulfill(path=FIXTURES / "login.html", content_type="text/html")
         if req.resource_type == "fetch":
             return self._home_for_check(route)
@@ -53,8 +62,10 @@ class FakeKA:
         if self.on_success == "hang":
             return route.fulfill(json={})
         self.signed_in = True
-        key = "spa_navigate" if self.on_success == "spa" else "navigate"
-        return route.fulfill(json={key: "/"})
+        if self.on_success == "spa":
+            return route.fulfill(json={"spa_navigate": "/"})
+        landing = "https://www.khanacademy.org/" if self.login_host == "accounts" else "/"
+        return route.fulfill(json={"navigate": landing})
 
     def _home_html(self, has_profile: bool, flag: bool = True) -> str:
         """Like KA, the server renders the session flags into the page (format seen on the real site)."""
@@ -101,6 +112,7 @@ def launch(tmp_path, fake_ka):
         contexts.append(ctx)
         ctx.route("**/*", lambda route: route.abort())  # nothing leaves the machine...
         ctx.route("https://www.khanacademy.org/**", fake_ka.handle)  # ...except to the fake KA
+        ctx.route("https://accounts.khanacademy.org/**", fake_ka.handle)
         page = ctx.new_page()
         lines = []
         page.on("console", lambda m: lines.append(m.text))

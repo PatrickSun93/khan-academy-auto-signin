@@ -36,7 +36,7 @@ If a CAPTCHA appears, the script prints `NEEDS HUMAN` and waits for you to finis
 
 ## Design decisions
 
-TODO (expand): the outcome states (failure / success / uncertain / needs-human / info); why the content script matches all of www.khanacademy.org but acts only on the login page or right after its own submit; the sessionStorage "pending" marker; why credentials go through the service worker rather than web_accessible_resources.
+TODO (expand): the outcome states (failure / success / uncertain / needs-human / info); why the content script matches all of www.khanacademy.org but acts only on the login page or right after its own submit; the per-tab "pending" marker kept by the service worker in `chrome.storage.session` (it has to survive the jump from accounts.khanacademy.org to www.khanacademy.org, and a page's sessionStorage is per origin); why credentials go through the service worker rather than web_accessible_resources.
 
 **One attempt per visit.** A visit is one load of the login page, or one SPA route change into it. Reloading the login page counts as a new visit, so it tries again. A reload caused by our own submit doesn't count as a new visit: the pending marker identifies it, and that page only judges the earlier attempt.
 
@@ -56,8 +56,8 @@ TODO (expand): the outcome states (failure / success / uncertain / needs-human /
 
 | Requested | Why |
 |---|---|
-| `content_scripts.matches: https://www.khanacademy.org/*` | TODO: the only host access. Needed on the login page, and on the page the submit lands on, to verify the sign-in. |
-| `storage` | Holds the sliding-window attempt counter (at most 3 sign-in submits per 5 minutes, across all tabs), so a wrong config plus repeated reloads can't get the account locked. Only timestamps are stored, never credentials. `chrome.storage` is used rather than the site's localStorage so KA's page scripts can't read or reset it. |
+| `content_scripts.matches: https://www.khanacademy.org/*`, `https://accounts.khanacademy.org/*` | The only host access. KA serves the login form at `www.khanacademy.org/login` for some browsers and redirects others to `accounts.khanacademy.org/login` (seen on 2026-11-06), so both are needed. The script also has to run on the page the submit lands on, to verify the sign-in. On any other page it does nothing. |
+| `storage` | `chrome.storage.session` (memory only) holds the per-tab pending marker for an attempt in flight. `chrome.storage.local` holds the sliding-window attempt counter (at most 3 sign-in submits per 5 minutes, across all tabs), so a wrong config plus repeated reloads can't get the account locked. Only timestamps are stored, never credentials. `chrome.storage` is used rather than the site's localStorage so KA's page scripts can't read or reset it. |
 | (no `host_permissions`) | The config is read from the extension package, and the service worker never contacts KA. |
 
 ## Tests

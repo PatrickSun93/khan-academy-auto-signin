@@ -1,6 +1,7 @@
 // Khan Academy auto sign-in: content script.
 //
-// It's injected on every www.khanacademy.org page, but it only acts in two situations:
+// It's injected on every www.khanacademy.org and accounts.khanacademy.org page (KA sends many
+// users from www.khanacademy.org/login to accounts.khanacademy.org/login), but it only acts in two situations:
 //   1. The page is the login page: it signs in once per visit.
 //   2. A "pending" marker from its own submit is present: it judges how that attempt turned out
 //      (the submit may have navigated to another page).
@@ -16,8 +17,6 @@
 //   info         Nothing was attempted (already signed in, no config, ...).
 (() => {
   const LOG_PREFIX = '[KA auto sign-in]';
-  const MARKER_KEY = 'kaAutoSignin.pending'; // lives in the page's sessionStorage (this tab only)
-  const MARKER_TTL_MS = 30_000; // an older marker is treated as stale and ignored
   const FORM_TIMEOUT_MS = 10_000; // time allowed for the SPA to render the login form
   const OUTCOME_TIMEOUT_MS = 15_000; // time after submit to wait for an error or a sign-in
   const VERIFY_TIMEOUT_MS = 10_000; // time allowed for the session to show up on KA's home page
@@ -89,24 +88,18 @@
   }
 
   // ---------- "pending" marker: carries one attempt across a navigation ----------
+  // Kept by the background per tab (see background.js for why not sessionStorage).
 
-  function readMarker() {
-    try {
-      const m = JSON.parse(sessionStorage.getItem(MARKER_KEY));
-      if (m && typeof m.at === 'number' && Date.now() - m.at < MARKER_TTL_MS) return m;
-    } catch (e) { /* storage blocked or bad JSON: treat it as no marker */ }
-    clearMarker();
-    return null;
+  async function readMarker() {
+    try { return await chrome.runtime.sendMessage({ type: 'getPending' }); } catch (e) { return null; }
   }
 
-  function writeMarker() {
-    const m = { at: Date.now() };
-    try { sessionStorage.setItem(MARKER_KEY, JSON.stringify(m)); } catch (e) { /* see README limitations */ }
-    return m;
+  async function writeMarker() {
+    try { return await chrome.runtime.sendMessage({ type: 'setPending' }); } catch (e) { return null; }
   }
 
-  function clearMarker() {
-    try { sessionStorage.removeItem(MARKER_KEY); } catch (e) { /* nothing to clear */ }
+  async function clearMarker() {
+    try { await chrome.runtime.sendMessage({ type: 'clearPending' }); } catch (e) { /* nothing to clear */ }
   }
 
   // ---------- page helpers ----------
@@ -213,7 +206,9 @@
         `Waiting avoids locking the account. Try again in about ${wait} min.`);
     }
     step('submitting (attempt reserved)');
-    const marker = writeMarker(); // write it before submitting: the submit might reload the page
+    const marker = await writeMarker(); // write it before submitting: the submit might navigate away
+    // Without the marker, the page we land on couldn't judge the result, so don't submit.
+    if (!marker) return report('uncertain', 'Could not save the attempt state; did not submit. Reload the page to try again.');
     form.b.click(); // the same thing a user does
     await judgeOutcome(marker, preexisting);
   }
@@ -252,7 +247,7 @@
   }
 
   function finish(kind, message) {
-    clearMarker();
+    clearMarker(); // no need to wait: the message is shown either way
     report(kind, message);
   }
 
@@ -283,12 +278,15 @@
     wasOnLogin = onLogin;
   }
 
-  const marker = readMarker();
-  if (marker) {
-    // This page load came out of our own submit: judge that attempt, don't start a new one.
-    wasOnLogin = isLoginPage();
-    run(() => judgeOutcome(marker, new Set()));
-  }
-  tick();
-  setInterval(tick, 500); // simple way to notice SPA route changes into /login
+  (async () => {
+    // Check for a marker first: if this page load came out of our own submit, it must judge that
+    // attempt and must not start a new one, even if it's the login page again.
+    const marker = await readMarker();
+    if (marker) {
+      wasOnLogin = isLoginPage();
+      run(() => judgeOutcome(marker, new Set()));
+    }
+    tick();
+    setInterval(tick, 500); // simple way to notice SPA route changes into /login
+  })();
 })();

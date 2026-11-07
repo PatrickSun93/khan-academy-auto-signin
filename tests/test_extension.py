@@ -51,6 +51,27 @@ def test_success_after_full_navigation_is_confirmed(launch, fake_ka):
     assert any("success" in line for line in lines)
 
 
+def test_login_on_accounts_subdomain_is_handled_and_confirmed_on_www(launch, fake_ka):
+    # Seen on the real site 2026-11-06: www.khanacademy.org/login -> accounts.khanacademy.org/login.
+    # The submit happens on accounts.*, the result is judged on www.*, so the pending marker
+    # has to cross origins (it lives in the background, not in the page's sessionStorage).
+    fake_ka.login_host = "accounts"
+    _, page, _ = launch()
+    page.goto(LOGIN)
+    kind, _ = toast(page)
+    assert kind == "success"
+    assert page.url == "https://www.khanacademy.org/"
+    assert fake_ka.login_posts == 1
+
+
+def test_wrong_credentials_on_accounts_subdomain_show_ka_error(launch, fake_ka):
+    fake_ka.login_host = "accounts"
+    _, page, _ = launch({"username": GOOD_USER, "password": "wrong"})
+    page.goto(LOGIN)
+    assert toast(page) == ("failure", KA_ERROR)
+    assert page.url.startswith("https://accounts.khanacademy.org/login")
+
+
 def test_success_after_spa_navigation_is_confirmed(launch, fake_ka):
     fake_ka.on_success = "spa"
     _, page, _ = launch()
